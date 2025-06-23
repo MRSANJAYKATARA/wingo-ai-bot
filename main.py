@@ -1,5 +1,3 @@
-print("🛠 CHROMEDRIVER PATH:", CHROMEDRIVER_PATH)
-print("🛠 CHROMIUM BINARY PATH:", CHROMIUM_BINARY)
 import os
 import time
 import json
@@ -174,6 +172,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     global driver
+    
+    print("🛠 CHROMEDRIVER PATH:", CHROMEDRIVER_PATH)
+    print("🛠 CHROMIUM BINARY PATH:", CHROMIUM_BINARY)
+    
     load_stats()
     try:
         driver = start_driver()
