@@ -1,3 +1,5 @@
+print("🛠 CHROMEDRIVER PATH:", CHROMEDRIVER_PATH)
+print("🛠 CHROMIUM BINARY PATH:", CHROMIUM_BINARY)
 import os
 import time
 import json
