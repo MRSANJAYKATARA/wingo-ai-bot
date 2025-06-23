@@ -1,4 +1,3 @@
-
 import os
 import time
 import json
@@ -12,23 +11,16 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler,
-    JobQueue
-)
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
-# ====== CONFIG ======
+# Hardcoded values for Railway deployment
 TOKEN = "7713466266:AAGopg4ItYBXvJxb7Ic6cw5_3HxskjCEepI"
 CHANNEL_ID = "@whitehackerai"
-CHROMEDRIVER_PATH = "/data/data/com.termux/files/usr/lib/chromium/chromedriver"
-CHROMIUM_BINARY = "/data/data/com.termux/files/usr/lib/chromium/chrome"
+CHROMEDRIVER_PATH = "/app/.chromedriver/bin/chromedriver"
+CHROMIUM_BINARY = "/app/.chromium-browser/bin/chromium"
 WINGO_URL = "https://zdj6.wingoanalyst.com/#/wingo_1m"
 DATA_FILE = "wingo_stats.json"
 
-# ====== VARIABLES ======
 latest_period = None
 wins = 0
 losses = 0
@@ -38,33 +30,21 @@ data_history = deque(maxlen=10)
 driver = None
 running = True
 
-# ====== EXIT HANDLER ======
-def signal_handler(sig, frame):
-    os.system("clear")
-    print("SUCCESSFULLY EXITED BY USER ✅")
-    os._exit(0)
+signal.signal(signal.SIGINT, lambda sig, frame: exit())
+signal.signal(signal.SIGTERM, lambda sig, frame: exit())
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-# ====== FILE I/O ======
 def load_stats():
     global wins, losses
-    try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE) as f:
-                stats = json.load(f)
-                wins = stats.get("wins", 0)
-                losses = stats.get("losses", 0)
-    except: pass
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE) as f:
+            stats = json.load(f)
+            wins = stats.get("wins", 0)
+            losses = stats.get("losses", 0)
 
 def save_stats():
-    try:
-        with open(DATA_FILE, 'w') as f:
-            json.dump({"wins": wins, "losses": losses}, f)
-    except: pass
+    with open(DATA_FILE, 'w') as f:
+        json.dump({"wins": wins, "losses": losses}, f)
 
-# ====== SELENIUM ======
 def start_driver():
     options = Options()
     options.add_argument("--headless=new")
@@ -74,27 +54,6 @@ def start_driver():
     service = Service(executable_path=CHROMEDRIVER_PATH)
     return webdriver.Chrome(service=service, options=options)
 
-def fetch_live():
-    global driver
-    try:
-        if not driver:
-            driver = start_driver()
-        driver.get(WINGO_URL)
-        time.sleep(3)
-        period_elem = driver.find_elements(By.XPATH, "//span[contains(text(),'202')]")
-        period = period_elem[0].text.strip() if period_elem else "UNKNOWN"
-        num_elem = driver.find_elements(By.XPATH, "//div[@style[contains(.,'height: 50px')]]/span")
-        current_number = int(num_elem[0].text.strip()) if num_elem else -1
-        return period, current_number
-    except:
-        try:
-            if driver:
-                driver.quit()
-        except: pass
-        driver = None
-        return "ERROR", -1
-
-# ====== AI LOGIC ======
 def get_color(num):
     if num in [0, 5]: return "🟣 VIOLET"
     return "🔴 RED" if num % 2 == 0 else "🟢 GREEN"
@@ -116,7 +75,24 @@ def predict_ai():
             pred_num = random.randint(0, 9)
     return pred_num, get_color(pred_num), get_size(pred_num)
 
-# ====== UI & BUTTONS ======
+def fetch_live():
+    global driver
+    try:
+        if not driver:
+            driver = start_driver()
+        driver.get(WINGO_URL)
+        time.sleep(3)
+        period_elem = driver.find_elements(By.XPATH, "//span[contains(text(),'202')]")
+        period = period_elem[0].text.strip() if period_elem else "UNKNOWN"
+        num_elem = driver.find_elements(By.XPATH, "//div[@style[contains(.,'height: 50px')]]/span")
+        current_number = int(num_elem[0].text.strip()) if num_elem else -1
+        return period, current_number
+    except:
+        if driver:
+            driver.quit()
+        driver = None
+        return "ERROR", -1
+
 def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ START PREDICTION", callback_data="start_prediction")],
@@ -148,8 +124,7 @@ def format_prediction_message(period):
     )
     return msg
 
-# ====== LOOP ======
-async def prediction_loop(context: ContextTypes.DEFAULT_TYPE):
+async def prediction_loop(app):
     global latest_period, wins, losses, current_prediction, last_result, data_history
     while True:
         period, current_number = fetch_live()
@@ -170,37 +145,31 @@ async def prediction_loop(context: ContextTypes.DEFAULT_TYPE):
             latest_period = period
             current_prediction['number'], current_prediction['color'], current_prediction['size'] = predict_ai()
             try:
-                await context.bot.send_message(chat_id=CHANNEL_ID, text=format_prediction_message(period), parse_mode="Markdown")
-            except: pass
+                await app.bot.send_message(chat_id=CHANNEL_ID, text=format_prediction_message(period), parse_mode="Markdown")
+            except:
+                pass
         await asyncio.sleep(60)
 
-# ====== HANDLERS ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.reply_text(
-            "👋 Welcome to 51 Game AI Bot!\nSelect an option below:",
-            reply_markup=main_menu()
-        )
-    except: pass
+    await update.message.reply_text(
+        "👋 Welcome to 51 Game AI Bot!\nSelect an option below:",
+        reply_markup=main_menu()
+    )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    try:
-        if query.data == "start_prediction":
-            await query.edit_message_text(
-                format_prediction_message(latest_period if latest_period else "---"),
-                reply_markup=support_menu(),
-                parse_mode="Markdown"
-            )
-        elif query.data == "support_menu":
-            await query.edit_message_text("👇 Links:", reply_markup=support_menu())
-        elif query.data == "show_stats":
-            await query.edit_message_text(
-                f"📊 STATS ➤ ✅ W: {wins} | ❌ L: {losses}")
-    except: pass
+    if query.data == "start_prediction":
+        await query.edit_message_text(
+            format_prediction_message(latest_period if latest_period else "---"),
+            reply_markup=support_menu(),
+            parse_mode="Markdown"
+        )
+    elif query.data == "support_menu":
+        await query.edit_message_text("👇 Links:", reply_markup=support_menu())
+    elif query.data == "show_stats":
+        await query.edit_message_text(f"📊 STATS ➤ ✅ W: {wins} | ❌ L: {losses}")
 
-# ====== MAIN FUNCTION ======
 def main():
     global driver
     load_stats()
@@ -208,25 +177,14 @@ def main():
         driver = start_driver()
     except:
         driver = None
-
     app = Application.builder().token(TOKEN).build()
-
-    # ✅ FIXED JOBQUEUE SETUP
-    job_queue = JobQueue()
-    job_queue.set_application(app)
-    job_queue.start()
-    app.job_queue = job_queue
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
-
-    app.job_queue.run_once(lambda ctx: asyncio.create_task(prediction_loop(ctx)), when=5)
-
-    os.system("clear")
-    print("SUCCESSFULLY BOT RUNNING ✅")
-    try:
-        app.run_polling()
-    except: pass
+    loop = asyncio.get_event_loop()
+    loop.create_task(prediction_loop(app))
+    print("✅ BOT RUNNING")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
+    
