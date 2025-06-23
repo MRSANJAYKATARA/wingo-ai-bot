@@ -14,7 +14,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
 # Hardcoded values for Railway deployment
-TOKEN = "7713466266:AAGopg4ItYBXvJxb7Ic6cw5_3HxskjCEepI"
+TOKEN = "7963409762:AAEEw4ctYgqY3iNtVbuq44Swdncm6bu7BwY"
 CHANNEL_ID = "@whitehackerai"
 CHROMEDRIVER_PATH = "/app/.chromedriver/bin/chromedriver"
 CHROMIUM_BINARY = "/app/.chromium-browser/bin/chromium"
