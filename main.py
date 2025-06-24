@@ -42,7 +42,8 @@ def save_stats():
 
 # Determine color based on number
 def get_color(num):
-    if num in [0, 5]: return "🟣 VIOLET"
+    if num in [0, 5]:
+        return "🟣 VIOLET"
     return "🔴 RED" if num % 2 == 0 else "🟢 GREEN"
 
 # Determine size based on number
@@ -92,7 +93,7 @@ def format_prediction_message(period):
     msg = (
         "🔥 51Game  AI BOT  \n"
         "✨• PREDICTION 💎✨  \n\n"
-        f"🧣 PERIOD NUMBER ➔ {period[-3:] if period else '---'}  \n"
+        f"🧃 PERIOD NUMBER ➔ {period[-3:] if period else '---'}  \n"
         f"🎯 BET ➔ {pred_num} {pred_size} {pred_color.split()[0]}  \n\n"
         f"🖙 LAST RESULT ➔ {last_result}  \n"
         f"📊 WIN: {wins}   |   LOSS: {losses}    R - [click  here](https://t.me/x1nonly_white_aura)"
@@ -103,12 +104,16 @@ def format_prediction_message(period):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global latest_period, awaiting_period, awaiting_results, data_history, current_prediction, wins, losses, last_result
     text = update.message.text.strip()
+
+    # If bot is waiting for period input
     if awaiting_period:
         latest_period = text
         awaiting_period = False
         await update.message.reply_text("✅ Period saved. Now enter last 3 results (space-separated):")
         awaiting_results = True
         return
+
+    # If bot is waiting for result input
     elif awaiting_results:
         try:
             nums = list(map(int, text.split()))
@@ -116,6 +121,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Enter exactly 3 numbers separated by space.")
                 return
             data_history.extend(nums)
+
+            # Evaluate last result vs prediction
             actual_size = get_size(nums[-1])
             if actual_size == current_prediction.get('size'):
                 last_result = f"✅ {actual_size} WIN"
@@ -123,9 +130,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 last_result = "❌ LOSS"
                 losses += 1
+
             save_stats()
+
+            # Predict next result
             current_prediction['number'], current_prediction['color'], current_prediction['size'] = predict_ai()
             awaiting_results = False
+
+            # Send updated prediction
             await update.message.reply_text(format_prediction_message(latest_period), parse_mode="Markdown")
         except:
             await update.message.reply_text("❌ Invalid input. Send 3 numbers only.")
@@ -167,5 +179,4 @@ def main():
 
 # Entry point
 if __name__ == "__main__":
-    main()
-    
+    main()    
