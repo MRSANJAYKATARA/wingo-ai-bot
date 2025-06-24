@@ -4,63 +4,52 @@ import json
 import random
 import asyncio
 import signal
-from datetime import datetime
 from collections import deque
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
-# Hardcoded values for Railway deployment
+# Telegram bot credentials
 TOKEN = "7963409762:AAEEw4ctYgqY3iNtVbuq44Swdncm6bu7BwY"
 CHANNEL_ID = "@whitehackerai"
-CHROMEDRIVER_PATH = "/app/.chromedriver/bin/chromedriver"
-CHROMIUM_BINARY = "/app/.chromium-browser/bin/chromium"
-WINGO_URL = "https://zdj6.wingoanalyst.com/#/wingo_1m"
-DATA_FILE = "wingo_stats.json"
 
+# Bot state variables
 latest_period = None
 wins = 0
 losses = 0
 current_prediction = {}
 last_result = "WAITING..."
 data_history = deque(maxlen=10)
-driver = None
-running = True
+awaiting_period = False
+awaiting_results = False
 
+# Shutdown handler for clean exit
 signal.signal(signal.SIGINT, lambda sig, frame: exit())
 signal.signal(signal.SIGTERM, lambda sig, frame: exit())
 
+# Load stored stats from file
 def load_stats():
     global wins, losses
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE) as f:
+    if os.path.exists("wingo_stats.json"):
+        with open("wingo_stats.json") as f:
             stats = json.load(f)
             wins = stats.get("wins", 0)
             losses = stats.get("losses", 0)
 
+# Save current stats to file
 def save_stats():
-    with open(DATA_FILE, 'w') as f:
+    with open("wingo_stats.json", 'w') as f:
         json.dump({"wins": wins, "losses": losses}, f)
 
-def start_driver():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.binary_location = CHROMIUM_BINARY
-    service = Service(executable_path=CHROMEDRIVER_PATH)
-    return webdriver.Chrome(service=service, options=options)
-
+# Determine color based on number
 def get_color(num):
     if num in [0, 5]: return "🟣 VIOLET"
     return "🔴 RED" if num % 2 == 0 else "🟢 GREEN"
 
+# Determine size based on number
 def get_size(num):
     return "BIG" if num >= 5 else "SMALL"
 
+# Predict next number using recent history
 def predict_ai():
     if len(data_history) < 3:
         pred_num = random.randint(0, 9)
@@ -75,37 +64,23 @@ def predict_ai():
             pred_num = random.randint(0, 9)
     return pred_num, get_color(pred_num), get_size(pred_num)
 
-def fetch_live():
-    global driver
-    try:
-        if not driver:
-            driver = start_driver()
-        driver.get(WINGO_URL)
-        time.sleep(3)
-        period_elem = driver.find_elements(By.XPATH, "//span[contains(text(),'202')]")
-        period = period_elem[0].text.strip() if period_elem else "UNKNOWN"
-        num_elem = driver.find_elements(By.XPATH, "//div[@style[contains(.,'height: 50px')]]/span")
-        current_number = int(num_elem[0].text.strip()) if num_elem else -1
-        return period, current_number
-    except:
-        if driver:
-            driver.quit()
-        driver = None
-        return "ERROR", -1
-
+# Generate inline menu UI
 def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ START PREDICTION", callback_data="start_prediction")],
         [InlineKeyboardButton("2️⃣ REGISTER & SUPPORT", callback_data="support_menu")],
-        [InlineKeyboardButton("3️⃣ RESULT & STATS", callback_data="show_stats")]
+        [InlineKeyboardButton("3️⃣ RESULT & STATS", callback_data="show_stats")],
+        [InlineKeyboardButton("4️⃣ NEXT PREDICTION", callback_data="next_prediction")]
     ])
 
+# Generate support menu UI
 def support_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📌 REGISTER NOW", url="https://51game6.in/#/register?invitationCode=53383112465")],
         [InlineKeyboardButton("👑 VIP SUPPORT", url="https://t.me/x1nonly_white_aura")]
     ])
 
+# Create styled prediction message
 def format_prediction_message(period):
     global current_prediction
     if not current_prediction:
@@ -117,75 +92,80 @@ def format_prediction_message(period):
     msg = (
         "🔥 51Game  AI BOT  \n"
         "✨• PREDICTION 💎✨  \n\n"
-        f"🧿 PERIOD NUMBER ➤ {period[-3:] if period else '---'}  \n"
-        f"🎯 BET ➤ {pred_num} {pred_size} {pred_color.split()[0]}  \n\n"
-        f"🔙 LAST RESULT ➤ {last_result}  \n"
+        f"🧣 PERIOD NUMBER ➔ {period[-3:] if period else '---'}  \n"
+        f"🎯 BET ➔ {pred_num} {pred_size} {pred_color.split()[0]}  \n\n"
+        f"🖙 LAST RESULT ➔ {last_result}  \n"
         f"📊 WIN: {wins}   |   LOSS: {losses}    R - [click  here](https://t.me/x1nonly_white_aura)"
     )
     return msg
 
-async def prediction_loop(app):
-    global latest_period, wins, losses, current_prediction, last_result, data_history
-    while True:
-        period, current_number = fetch_live()
-        if period == "ERROR" or current_number == -1:
-            await asyncio.sleep(60)
-            continue
-        if period != latest_period:
-            if latest_period and current_prediction:
-                actual_size = get_size(current_number)
-                if actual_size == current_prediction['size']:
-                    last_result = f"✅ {actual_size} WIN"
-                    wins += 1
-                else:
-                    last_result = "❌ LOSS"
-                    losses += 1
-                save_stats()
-            data_history.append(current_number)
-            latest_period = period
+# Handle user messages
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global latest_period, awaiting_period, awaiting_results, data_history, current_prediction, wins, losses, last_result
+    text = update.message.text.strip()
+    if awaiting_period:
+        latest_period = text
+        awaiting_period = False
+        await update.message.reply_text("✅ Period saved. Now enter last 3 results (space-separated):")
+        awaiting_results = True
+        return
+    elif awaiting_results:
+        try:
+            nums = list(map(int, text.split()))
+            if len(nums) != 3:
+                await update.message.reply_text("❌ Enter exactly 3 numbers separated by space.")
+                return
+            data_history.extend(nums)
+            actual_size = get_size(nums[-1])
+            if actual_size == current_prediction.get('size'):
+                last_result = f"✅ {actual_size} WIN"
+                wins += 1
+            else:
+                last_result = "❌ LOSS"
+                losses += 1
+            save_stats()
             current_prediction['number'], current_prediction['color'], current_prediction['size'] = predict_ai()
-            try:
-                await app.bot.send_message(chat_id=CHANNEL_ID, text=format_prediction_message(period), parse_mode="Markdown")
-            except:
-                pass
-        await asyncio.sleep(60)
+            awaiting_results = False
+            await update.message.reply_text(format_prediction_message(latest_period), parse_mode="Markdown")
+        except:
+            await update.message.reply_text("❌ Invalid input. Send 3 numbers only.")
+        return
 
+# Handle /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to 51 Game AI Bot!\nSelect an option below:",
         reply_markup=main_menu()
     )
 
+# Handle button clicks
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global awaiting_period, awaiting_results
     query = update.callback_query
     await query.answer()
     if query.data == "start_prediction":
-        await query.edit_message_text(
-            format_prediction_message(latest_period if latest_period else "---"),
-            reply_markup=support_menu(),
-            parse_mode="Markdown"
-        )
+        awaiting_period = True
+        awaiting_results = False
+        await query.edit_message_text("🔢 Send the current period number:")
+    elif query.data == "next_prediction":
+        awaiting_results = True
+        await query.edit_message_text("🔢 Send last 3 result numbers (space-separated):")
     elif query.data == "support_menu":
         await query.edit_message_text("👇 Links:", reply_markup=support_menu())
     elif query.data == "show_stats":
-        await query.edit_message_text(f"📊 STATS ➤ ✅ W: {wins} | ❌ L: {losses}")
+        await query.edit_message_text(f"📊 STATS ➔ ✅ W: {wins} | ❌ L: {losses}")
 
+# Bot main function
 def main():
-    global driver
-    
     load_stats()
-    try:
-        driver = start_driver()
-    except:
-        driver = None
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
-    loop = asyncio.get_event_loop()
-    loop.create_task(prediction_loop(app))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("✅ BOT RUNNING")
     app.run_polling()
 
+# Entry point
 if __name__ == "__main__":
     main()
     
