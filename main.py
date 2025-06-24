@@ -7,11 +7,11 @@ from collections import deque
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
-# Telegram bot token and channel ID
+# Telegram Bot token and channel ID
 TOKEN = "7963409762:AAEEw4ctYgqY3iNtVbuq44Swdncm6bu7BwY"
 CHANNEL_ID = "@whitehackerai"
 
-# State variables
+# Initialize global variables
 latest_period = None
 wins = 0
 losses = 0
@@ -21,11 +21,11 @@ data_history = deque(maxlen=10)
 awaiting_period = False
 awaiting_results = False
 
-# Handle termination gracefully
+# Graceful shutdown handlers
 signal.signal(signal.SIGINT, lambda sig, frame: exit())
 signal.signal(signal.SIGTERM, lambda sig, frame: exit())
 
-# Load saved win/loss stats
+# Load past win/loss stats
 def load_stats():
     global wins, losses
     if os.path.exists("wingo_stats.json"):
@@ -34,28 +34,28 @@ def load_stats():
             wins = stats.get("wins", 0)
             losses = stats.get("losses", 0)
 
-# Save current win/loss stats
+# Save current stats
 def save_stats():
     with open("wingo_stats.json", 'w') as f:
         json.dump({"wins": wins, "losses": losses}, f)
 
-# Return color based on number rules
+# Decide color based on number (Wingo rules)
 def get_color(num):
     if num in [0, 5]:
         return "🟣 VIOLET"
     return "🔴 RED" if num % 2 == 0 else "🟢 GREEN"
 
-# Return size classification based on number
+# Decide size based on number
 def get_size(num):
     return "BIG" if num >= 5 else "SMALL"
 
-# Smart prediction based on previous results
+# Prediction logic based on AI rule using last 3 numbers
 def predict_ai():
     if len(data_history) < 3:
         pred_num = random.randint(0, 9)
     else:
         last_three = list(data_history)[-3:]
-        avg = sum(last_three) / len(last_three)
+        avg = sum(last_three) / 3
         if avg < 3.5:
             pred_num = random.choices([6, 7, 8, 9], weights=[25, 30, 25, 20])[0]
         elif avg > 6.5:
@@ -64,7 +64,7 @@ def predict_ai():
             pred_num = random.randint(0, 9)
     return pred_num, get_color(pred_num), get_size(pred_num)
 
-# Main menu with inline buttons
+# Return inline keyboard for main menu
 def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ START PREDICTION", callback_data="start_prediction")],
@@ -73,55 +73,56 @@ def main_menu():
         [InlineKeyboardButton("4️⃣ NEXT PREDICTION", callback_data="next_prediction")]
     ])
 
-# Support and registration menu
+# Return support/registration buttons
 def support_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📌 REGISTER NOW", url="https://51game6.in/#/register?invitationCode=53383112465")],
         [InlineKeyboardButton("👑 VIP SUPPORT", url="https://t.me/x1nonly_white_aura")]
     ])
 
-# Format prediction display message
+# Styled prediction message
 def format_prediction_message(period):
     global current_prediction
     if not current_prediction:
         current_prediction['number'], current_prediction['color'], current_prediction['size'] = predict_ai()
+
     pred_num = current_prediction['number']
     pred_color = current_prediction['color']
     pred_size = current_prediction['size']
     accuracy = round((wins / (wins + losses)) * 100, 1) if (wins + losses) > 0 else 0.0
+
     msg = (
-        "🔥 51Game  AI BOT  \n"
-        "✨• PREDICTION 💎✨  \n\n"
-        f"🧃 PERIOD NUMBER ➔ {period[-3:] if period else '---'}  \n"
-        f"🎯 BET ➔ {pred_num} {pred_size} {pred_color.split()[0]}  \n\n"
-        f"🖙 LAST RESULT ➔ {last_result}  \n"
-        f"📊 WIN: {wins}   |   LOSS: {losses}    R - [click  here](https://t.me/x1nonly_white_aura)"
+        "🔥 51Game AI BOT\n"
+        "✨• PREDICTION 💎✨\n\n"
+        f"🧿 PERIOD NUMBER ➤ {period[-3:] if period else '---'}\n"
+        f"🎯 BET ➤ {pred_num} {pred_size} {pred_color.split()[0]}\n\n"
+        f"🔙 LAST RESULT ➤ {last_result}\n"
+        f"📊 WIN: {wins}   |   LOSS: {losses}    R - [click here](https://t.me/x1nonly_white_aura)"
     )
     return msg
 
-# Process user inputs (period or result)
+# Handle user messages (period + result input)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global latest_period, awaiting_period, awaiting_results, data_history, current_prediction, wins, losses, last_result
     text = update.message.text.strip()
 
-    # User enters period number
     if awaiting_period:
         latest_period = text
         awaiting_period = False
-        await update.message.reply_text("✅ Period saved. Now enter last 3 results (space-separated):")
         awaiting_results = True
+        await update.message.reply_text("✅ Period saved. Now enter last 3 results (space-separated):")
         return
 
-    # User enters result numbers
-    elif awaiting_results:
+    if awaiting_results:
         try:
             nums = list(map(int, text.split()))
             if len(nums) != 3:
                 await update.message.reply_text("❌ Enter exactly 3 numbers separated by space.")
                 return
-            data_history.extend(nums)
 
+            data_history.extend(nums)
             actual_size = get_size(nums[-1])
+
             if actual_size == current_prediction.get('size'):
                 last_result = f"✅ {actual_size} WIN"
                 wins += 1
@@ -130,6 +131,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 losses += 1
 
             save_stats()
+
             current_prediction['number'], current_prediction['color'], current_prediction['size'] = predict_ai()
             awaiting_results = False
 
@@ -138,7 +140,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Invalid input. Send 3 numbers only.")
         return
 
-# Respond to /start command
+# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to 51 Game AI Bot!\nSelect an option below:",
@@ -166,7 +168,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "show_stats":
         await query.edit_message_text(f"📊 STATS ➔ ✅ W: {wins} | ❌ L: {losses}")
 
-# Main bot runner
+# Bot entry point
 def main():
     load_stats()
     app = Application.builder().token(TOKEN).build()
@@ -176,7 +178,5 @@ def main():
     print("✅ BOT RUNNING")
     app.run_polling()
 
-# Start the bot
 if __name__ == "__main__":
     main()
-    
