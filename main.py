@@ -1,3 +1,4 @@
+# Enhanced 51Game AI Bot with Selenium Integration
 import os
 import json
 import random
@@ -6,12 +7,17 @@ import signal
 from collections import deque
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
-# Telegram Bot token and channel ID
-TOKEN = "7963409762:AAEEw4ctYgqY3iNtVbuq44Swdncm6bu7BwY"
+# --- Configuration ---
+TOKEN = "8040444270:AAGfxIY5ijJcvBVn530QHqgBSYSTWeOfCpY"
 CHANNEL_ID = "@whitehackerai"
+WINGO_URL = "https://zdj6.wingoanalyst.com/#/wingo_30s"
 
-# Initialize global variables
+# --- Global Variables ---
 latest_period = None
 wins = 0
 losses = 0
@@ -21,11 +27,40 @@ data_history = deque(maxlen=10)
 awaiting_period = False
 awaiting_results = False
 
-# Graceful shutdown handlers
-signal.signal(signal.SIGINT, lambda sig, frame: exit())
-signal.signal(signal.SIGTERM, lambda sig, frame: exit())
+# --- Selenium Setup ---
+def setup_browser():
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    driver = webdriver.Chrome(options=options)
+    return driver
 
-# Load past win/loss stats
+def run_prediction_selenium():
+    driver = setup_browser()
+    try:
+        driver.get(WINGO_URL)
+        print("🔍 Opened Wingo Analyst Site.")
+
+        # Wait and fetch the latest period and result number
+        driver.implicitly_wait(10)
+        period_elements = driver.find_elements(By.XPATH, "//span[contains(text(),'202')]")
+        number_elements = driver.find_elements(By.XPATH, "//div[@style[contains(.,'height: 50px')]]")
+
+        period = period_elements[0].text.strip() if period_elements else "UNKNOWN"
+        numbers = [int(el.text.strip()) for el in number_elements if el.text.strip().isdigit()]
+
+        if numbers:
+            data_history.append(numbers[0])
+            print(f"✅ Selenium fetched: Period = {period}, Number = {numbers[0]}")
+        else:
+            print("⚠️ No valid number found.")
+
+    except Exception as e:
+        print(f"❌ Selenium error: {e}")
+    finally:
+        driver.quit()
+
+# --- Stats Functions ---
 def load_stats():
     global wins, losses
     if os.path.exists("wingo_stats.json"):
@@ -34,22 +69,18 @@ def load_stats():
             wins = stats.get("wins", 0)
             losses = stats.get("losses", 0)
 
-# Save current stats
 def save_stats():
     with open("wingo_stats.json", 'w') as f:
         json.dump({"wins": wins, "losses": losses}, f)
 
-# Decide color based on number (Wingo rules)
 def get_color(num):
     if num in [0, 5]:
         return "🟣 VIOLET"
     return "🔴 RED" if num % 2 == 0 else "🟢 GREEN"
 
-# Decide size based on number
 def get_size(num):
     return "BIG" if num >= 5 else "SMALL"
 
-# Prediction logic based on AI rule using last 3 numbers
 def predict_ai():
     if len(data_history) < 3:
         pred_num = random.randint(0, 9)
@@ -64,7 +95,6 @@ def predict_ai():
             pred_num = random.randint(0, 9)
     return pred_num, get_color(pred_num), get_size(pred_num)
 
-# Return inline keyboard for main menu
 def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ START PREDICTION", callback_data="start_prediction")],
@@ -73,14 +103,12 @@ def main_menu():
         [InlineKeyboardButton("4️⃣ NEXT PREDICTION", callback_data="next_prediction")]
     ])
 
-# Return support/registration buttons
 def support_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📌 REGISTER NOW", url="https://51game6.in/#/register?invitationCode=53383112465")],
         [InlineKeyboardButton("👑 VIP SUPPORT", url="https://t.me/x1nonly_white_aura")]
     ])
 
-# Styled prediction message
 def format_prediction_message(period):
     global current_prediction
     if not current_prediction:
@@ -93,7 +121,7 @@ def format_prediction_message(period):
 
     msg = (
         "🔥 51Game AI BOT\n"
-        "✨• PREDICTION 💎✨\n\n"
+        "✨• PREDICTION 💫✨\n\n"
         f"🧿 PERIOD NUMBER ➤ {period[-3:] if period else '---'}\n"
         f"🎯 BET ➤ {pred_num} {pred_size} {pred_color.split()[0]}\n\n"
         f"🔙 LAST RESULT ➤ {last_result}\n"
@@ -101,7 +129,6 @@ def format_prediction_message(period):
     )
     return msg
 
-# Handle user messages (period + result input)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global latest_period, awaiting_period, awaiting_results, data_history, current_prediction, wins, losses, last_result
     text = update.message.text.strip()
@@ -140,20 +167,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Invalid input. Send 3 numbers only.")
         return
 
-# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to 51 Game AI Bot!\nSelect an option below:",
         reply_markup=main_menu()
     )
 
-# Handle button clicks
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global awaiting_period, awaiting_results
     query = update.callback_query
     await query.answer()
 
     if query.data == "start_prediction":
+        run_prediction_selenium()
         awaiting_period = True
         awaiting_results = False
         await query.edit_message_text("🔢 Send the current period number:")
@@ -168,7 +194,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "show_stats":
         await query.edit_message_text(f"📊 STATS ➔ ✅ W: {wins} | ❌ L: {losses}")
 
-# Bot entry point
 def main():
     load_stats()
     app = Application.builder().token(TOKEN).build()
@@ -180,3 +205,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
